@@ -1,0 +1,8 @@
+streamlit
+pandas
+openai
+pydantic
+openpyxl
+python-calamine
+pyxlsb
+xlrd

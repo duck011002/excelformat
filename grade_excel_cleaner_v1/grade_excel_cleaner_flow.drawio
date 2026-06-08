@@ -1,0 +1,90 @@
+<mxfile host="app.diagrams.net" modified="2026-06-03T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="grade-cleaner-flow" name="Excel 成绩清洗流程">
+    <mxGraphModel dx="1400" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Excel 成绩数据清洗：输入到输出流程" style="text;html=1;strokeColor=none;fillColor=none;fontSize=24;fontStyle=1;fontColor=#1F2937;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="320" y="30" width="760" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="input" value="输入&#xa;非标准成绩 Excel&#xa;.xlsx / .xls / .xlsb" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#E0F2FE;strokeColor=#0284C7;fontSize=15;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="150" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="upload" value="Streamlit 页面&#xa;上传文件 + 填写 LLM 配置&#xa;base_url / api_key / model" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#F8FAFC;strokeColor=#64748B;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="330" y="150" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="read" value="Python 读取 Workbook&#xa;按 sheet 读取原始单元格&#xa;支持 fallback engine" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#ECFDF5;strokeColor=#059669;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="620" y="150" width="220" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="preview" value="构建 compact preview&#xa;文件名 / sheet / 前 N 行&#xa;候选表头和候选列名" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#ECFDF5;strokeColor=#059669;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="910" y="150" width="230" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="llm" value="LLM 分析 preview&#xa;只生成 extraction_plan JSON&#xa;不直接生成 CSV" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#FEF3C7;strokeColor=#D97706;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="910" y="330" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="plan" value="extraction_plan&#xa;sheet / 表头行 / 数据起始行&#xa;字段映射 / 元数据来源" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#FFF7ED;strokeColor=#EA580C;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="620" y="330" width="230" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="schema" value="Pydantic 校验计划&#xa;JSON 结构合法&#xa;行号和枚举值合法" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#F5F3FF;strokeColor=#7C3AED;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="330" y="330" width="220" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="execute" value="Python 执行计划&#xa;设置表头 / 选列 / 重命名&#xa;清洗学号、姓名、成绩" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#ECFDF5;strokeColor=#059669;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="70" y="330" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="validate" value="校验输出结果&#xa;固定 5 列 / 非空 / 学号有效率&#xa;成绩空值比例" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FDE68A;strokeColor=#B45309;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="395" y="535" width="160" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="repair" value="失败时二次修复&#xa;错误 + 可用列 + 样例数据&#xa;反馈给 LLM 重新生成计划" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;arcSize=12;fillColor=#FEE2E2;strokeColor=#DC2626;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="650" y="535" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="output" value="输出&#xa;页面 DataFrame 展示&#xa;下载统一 CSV" style="rounded=1;whiteSpace=wrap;html=1;arcSize=12;fillColor=#DCFCE7;strokeColor=#16A34A;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="540" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="cols" value="最终固定列：学号、学生姓名、课程名、班级名、最终成绩" style="rounded=1;whiteSpace=wrap;html=1;arcSize=10;fillColor=#F8FAFC;strokeColor=#94A3B8;fontSize=14;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="350" y="705" width="700" height="48" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="input" target="upload">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="upload" target="read">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="read" target="preview">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="preview" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="llm" target="plan">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="plan" target="schema">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="schema" target="execute">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#334155;" edge="1" parent="1" source="execute" target="validate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="通过" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#16A34A;fontColor=#166534;fontStyle=1;" edge="1" parent="1" source="validate" target="output">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="失败且启用修复" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#DC2626;fontColor=#991B1B;fontStyle=1;dashed=1;" edge="1" parent="1" source="validate" target="repair">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#DC2626;dashed=1;" edge="1" parent="1" source="repair" target="llm">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="830" y="500" />
+              <mxPoint x="1030" y="500" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" style="endArrow=block;html=1;rounded=0;strokeWidth=2;strokeColor=#16A34A;" edge="1" parent="1" source="output" target="cols">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
