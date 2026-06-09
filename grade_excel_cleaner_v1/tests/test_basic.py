@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 from grade_excel_cleaner.excel_reader import SheetData, WorkbookData
 from grade_excel_cleaner.executor import execute_plan
 from grade_excel_cleaner.schemas import ColumnMapping, ExtractionPlan, MetadataItem, MetadataMapping
+from grade_excel_cleaner.target_workflow import execute_target_workflow
 from grade_excel_cleaner.utils import extract_json_object
 from grade_excel_cleaner.validator import validate_output
 
@@ -65,7 +66,58 @@ def test_execute_plan_with_metadata_course_name():
     assert result.table_type_detected == "single_course_like"
 
 
+def test_execute_target_workflow_direct_target_columns():
+    raw = pd.DataFrame(
+        [
+            ["学号", "姓名", "课程目标1", "课程目标2", "卷面成绩"],
+            ["20230001", "张三", 0.8, 0.9, 85],
+            ["20230002.0", "李四", 1, 0.75, 88],
+        ]
+    )
+    workbook = WorkbookData(
+        filename="目标成绩.xlsx",
+        sheets={"综合测评": SheetData(name="综合测评", frame=raw)},
+        engine_used="mock",
+        read_warnings=[],
+    )
+
+    result = execute_target_workflow(workbook)
+
+    assert list(result.output.columns) == ["学号", "姓名", "课程目标1", "课程目标2", "总分"]
+    assert result.output.loc[0, "课程目标1"] == 80
+    assert result.output.loc[1, "课程目标2"] == 75
+    assert result.output.loc[0, "总分"] == 85
+
+
+def test_execute_target_workflow_multirow_grouped_targets():
+    raw = pd.DataFrame(
+        [
+            ["序号", "学号", "学生姓名", "毕业要求1", None, "毕业要求2", None, "总评成绩"],
+            [None, None, None, "课程目标1", None, "课程目标2", None, None],
+            [None, None, None, "学习表现", "期末考试", "作业", "期末考试", None],
+            [None, None, None, 5, 15, 10, 20, 100],
+            [1, "20230001", "张三", 4, 12, 8, 18, 84],
+            [2, "20230002", "李四", 5, 15, 10, 20, 100],
+        ]
+    )
+    workbook = WorkbookData(
+        filename="多行目标.xlsx",
+        sheets={"Sheet1": SheetData(name="Sheet1", frame=raw)},
+        engine_used="mock",
+        read_warnings=[],
+    )
+
+    result = execute_target_workflow(workbook)
+
+    assert list(result.output.columns) == ["学号", "姓名", "课程目标1", "课程目标2", "总分"]
+    assert result.output.loc[0, "课程目标1"] == 80
+    assert result.output.loc[0, "课程目标2"] == 86.67
+    assert result.output.loc[1, "总分"] == 100
+
+
 if __name__ == "__main__":
     test_extract_json_from_markdown_block()
     test_execute_plan_with_metadata_course_name()
+    test_execute_target_workflow_direct_target_columns()
+    test_execute_target_workflow_multirow_grouped_targets()
     print("basic tests passed")
