@@ -14,6 +14,7 @@ from grade_excel_cleaner.schemas import ColumnMapping, ExtractionPlan, MetadataI
 from grade_excel_cleaner.target_workflow import execute_target_workflow
 from grade_excel_cleaner.utils import extract_json_object
 from grade_excel_cleaner.validator import validate_output
+from app import _build_audit_issues
 
 
 def test_extract_json_from_markdown_block():
@@ -115,9 +116,26 @@ def test_execute_target_workflow_multirow_grouped_targets():
     assert result.output.loc[1, "总分"] == 100
 
 
+def test_audit_does_not_count_blank_student_ids_as_duplicates():
+    output = pd.DataFrame(
+        {
+            "学号": ["", "", "20230001", "20230002"],
+            "学生姓名": ["张三", "李四", "王五", "赵六"],
+            "最终成绩": [80, 81, 82, 83],
+        }
+    )
+
+    issues = _build_audit_issues(output, [])
+
+    issue_types = [issue["类型"] for issue in issues]
+    assert "学号 空值" in issue_types
+    assert "学号重复" not in issue_types
+
+
 if __name__ == "__main__":
     test_extract_json_from_markdown_block()
     test_execute_plan_with_metadata_course_name()
     test_execute_target_workflow_direct_target_columns()
     test_execute_target_workflow_multirow_grouped_targets()
+    test_audit_does_not_count_blank_student_ids_as_duplicates()
     print("basic tests passed")

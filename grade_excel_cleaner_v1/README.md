@@ -1,63 +1,88 @@
-# 成绩 Excel 智能清洗 v1.0
+# 成绩 Excel 智能清洗 v2.1
 
-本项目用于把非标准成绩 Excel 表格清洗成统一 CSV 结构。LLM 只负责根据表格预览生成 `extraction_plan`，最终数据读取、清洗、校验和导出都由 Python 确定性完成。
+本项目用于把不同格式的成绩 Excel 表格清洗成统一结构。当前支持两类课程表格：
+
+- 含课程总分成绩：输出 `学号`、`学生姓名`、`课程名`、`班级名`、`最终成绩`
+- 含课程目标成绩：输出 `学号`、`姓名`、`课程目标1-n`、`总分`
+
+## v2.1 功能
+
+- 支持 `.xls`、`.xlsx`、`.xlsb` 批量拖拽上传。
+- 表格类型可选 `混合类型识别`、`含课程总分成绩`、`含课程目标成绩`。
+- 混合识别会优先用 Python 检测课程目标结构，再由 LLM 判断字段映射和复杂规则。
+- 已完成文件默认不会重复解析，可勾选多个待解析文件后统一解析。
+- 文件列表固定展示解析结果，切换文件不会重复弹出导出窗口。
+- 支持直接导出当前文件，也支持选择性导出多个文件、指定字段、确认文件名和导出格式。
+- 字段映射、计算规则、识别依据和异常字段会在页面中展示，便于人工审核。
+- 生成结果只保存在当前 Streamlit 会话内存中，关闭或离开页面后会消失，不会在本地保存导出文件。
 
 ## 安装
 
+建议使用项目的 conda 环境：
+
 ```bash
+cd D:\project\zhihuishu\excelformat\grade_excel_cleaner_v1
+conda activate excel
 pip install -r requirements.txt
 ```
 
 ## 启动
 
+在项目目录 `D:\project\zhihuishu\excelformat\grade_excel_cleaner_v1` 下启动：
+
 ```bash
-streamlit run app.py
+conda activate excel
+python -m streamlit run app.py
 ```
 
-默认配置：
+如果需要指定端口：
 
-- LLM Base URL: `https://www.inroi.shop`
-- Model Name: `gpt-5.4`
-- API Key: 从页面密码框填写，或从环境变量 `OPENAI_API_KEY` / Streamlit secrets 读取
+```bash
+python -m streamlit run app.py --server.port 8501 --server.address localhost
+```
 
-## 使用
+启动后浏览器打开 `http://localhost:8501/`。如果 8501 已被占用，把 `--server.port` 后面的数字换成其他端口。
 
-1. 在侧边栏填写 LLM Base URL、API Key、Model Name。
-2. 上传 `.xlsx`、`.xls` 或 `.xlsb` 成绩表。
-3. 点击“解析”。
-4. 查看 extraction_plan、warnings、清洗结果表格。
-5. 点击“下载 CSV”导出。
+## 本地配置
 
-最终输出列固定为：
+LLM 配置从 `config/local_settings.json` 读取，也可以在页面右上角“设置”里临时修改。该文件已加入 `.gitignore`，不要提交真实 API Key。
 
-- 学号
-- 学生姓名
-- 课程名
-- 班级名
-- 最终成绩
+示例：
 
-## 设计说明
+```json
+{
+  "base_url": "https://llm-service.polymas.com/api/openai/v1",
+  "api_key": "YOUR_API_KEY",
+  "model": "gpt-5.4",
+  "preview_rows": 25,
+  "enable_repair": true
+}
+```
 
-流程为：
+也可以使用环境变量覆盖：
 
-1. Python 读取 workbook 并生成 compact preview。
-2. LLM 根据 preview 输出严格 JSON 格式的 extraction_plan。
-3. Pydantic 校验 extraction_plan。
-4. Python 执行计划并清洗数据。
-5. 校验输出结果。
-6. 如果失败且启用二次修复，将错误、可用列、样例数据和原 preview 反馈给 LLM 重新生成计划。
+- `OPENAI_BASE_URL`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `GRADE_CLEANER_PREVIEW_ROWS`
+- `GRADE_CLEANER_ENABLE_REPAIR`
 
-## 当前 v1.0 限制
+## 使用流程
 
-- 不保证所有合并单元格和复杂多层表头都能完美识别。
-- 不直接支持 PDF。
-- 极复杂表格可能需要二次修复或人工检查。
-- LLM 结果存在不确定性，所以 Python 会做 schema 和输出校验。
-- `.xlsb` 和 `.xls` 读取依赖本地 Python 包可用性，失败时建议另存为 `.xlsx` 后重试。
+1. 打开页面后上传一个或多个 Excel 文件。
+2. 选择表格类型，默认使用混合类型识别。
+3. 勾选需要解析的文件，点击“开始解析”。
+4. 在结果区查看数据预览、字段映射、识别依据和告警审核。
+5. 使用“直接导出”下载当前文件，或使用“选择性导出”选择多个文件和字段后导出。
 
-## v1.1 可扩展方向
+## LLM 使用方式
 
-- 增加无需 LLM 的规则兜底识别。
-- 支持多 sheet 合并输出。
-- 展示可编辑 extraction_plan，让用户人工修正后再执行。
-- 保存历史解析记录和配置模板。
+LLM 只负责理解表格结构、字段映射和复杂合并规则，不直接处理整张工作簿。程序会先由 Python 生成压缩预览，包括候选表头、少量样例行、sheet 信息和结构线索，再交给 LLM 生成解析计划。最终的数据读取、字段提取、总分计算、校验和导出都由 Python 执行。
+
+这样可以降低上下文长度，也便于追踪每个字段和规则的来源。
+
+## 测试
+
+```bash
+python tests/test_basic.py
+```

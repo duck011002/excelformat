@@ -8,6 +8,7 @@ env/
 
 .env
 .streamlit/secrets.toml
+grade_excel_cleaner_v1/config/local_settings.json
 
 database/
 *.xls
