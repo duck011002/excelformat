@@ -17,18 +17,30 @@ from grade_excel_cleaner.planner import WorkflowOutput, run_workflow
 from grade_excel_cleaner.preview_builder import preview_to_json
 from grade_excel_cleaner.settings import load_app_settings, normalize_base_url
 from grade_excel_cleaner.target_workflow import TargetWorkflowOutput, run_target_workflow
+from grade_excel_cleaner.llm_client import call_openai_compatible
+from grade_excel_cleaner.teaching_class import (
+    build_teaching_class_result,
+    flatten_groups,
+    refresh_teaching_warnings,
+    resolve_uncertain_groups,
+    scan_workbook,
+    teaching_class_to_xlsx,
+)
+from grade_excel_cleaner.teaching_class.schemas import TeachingClassResult
 
 
 MODE_AUTO = "混合类型识别"
 MODE_TOTAL = "含课程总分成绩"
 MODE_TARGET = "含课程目标成绩"
+PRIMARY_SCORE_ONLY = "仅解析成绩"
+PRIMARY_SCORE_TEACHING = "解析成绩和教学班"
 STATUS_PENDING = "待解析"
 STATUS_DONE = "已完成"
 STATUS_FAILED = "失败"
 
 
 def main() -> None:
-    st.set_page_config(page_title="成绩 Excel 智能清洗 v2.1", layout="wide")
+    st.set_page_config(page_title="成绩 Excel 智能清洗 v2.2", layout="wide")
     _inject_style()
     _inject_beforeunload_warning()
     _init_state()
@@ -38,12 +50,20 @@ def main() -> None:
         _reset_state()
         st.rerun()
 
-    st.segmented_control(
-        "表格类型",
-        [MODE_AUTO, MODE_TOTAL, MODE_TARGET],
-        key="score_mode",
-        help="默认混合识别会先用 Python 检测课程目标结构；未命中时再调用 LLM 识别总分成绩表。",
-    )
+    mode_col, subtype_col = st.columns([1.25, 1.75])
+    with mode_col:
+        st.segmented_control(
+            "解析内容",
+            [PRIMARY_SCORE_ONLY, PRIMARY_SCORE_TEACHING],
+            key="primary_mode",
+        )
+    with subtype_col:
+        st.selectbox(
+            "成绩解析类型",
+            [MODE_AUTO, MODE_TOTAL, MODE_TARGET],
+            key="score_mode",
+            help="混合识别会先检测课程目标结构；未命中时再调用 LLM 识别总分成绩表。",
+        )
     uploaded_files = _render_upload_section()
 
     if start_clicked:
@@ -85,12 +105,17 @@ def _init_state() -> None:
         st.session_state.settings_loaded = True
     if "score_mode" not in st.session_state:
         st.session_state.score_mode = MODE_AUTO
+    if "primary_mode" not in st.session_state:
+        st.session_state.primary_mode = PRIMARY_SCORE_ONLY
 
 
 def _reset_state() -> None:
     st.session_state.records = {}
     st.session_state.active_record_id = None
     st.session_state.upload_seed += 1
+    for key in list(st.session_state):
+        if key.startswith("parse_selected_") or key == "upload_queue_editor":
+            del st.session_state[key]
 
 
 def _runtime_settings() -> dict[str, Any]:
@@ -130,8 +155,8 @@ def _render_header() -> tuple[bool, bool]:
     with title_col:
         st.markdown(
             """
-            <div class="app-title">成绩 Excel 智能清洗 v2.1</div>
-            <div class="app-subtitle">批量上传、混合识别、字段溯源与人工审核</div>
+            <div class="app-title">成绩 Excel 智能清洗 v2.2</div>
+            <div class="app-subtitle">成绩清洗、教学班提取、字段溯源与人工审核</div>
             """,
             unsafe_allow_html=True,
         )
@@ -140,8 +165,10 @@ def _render_header() -> tuple[bool, bool]:
             st.markdown(
                 """
                 1. 上传一个或多个 `.xls`、`.xlsx`、`.xlsb` 文件。
-                2. 默认使用混合识别；也可以指定总分成绩或课程目标成绩。
-                3. 解析后查看字段映射、计算规则和告警，再选择字段导出。
+                2. 选择仅解析成绩，或同时解析成绩和教学班。
+                3. 成绩子类型可选混合识别、课程总分或课程目标。
+                4. 教学班字段可以按分组修改，也可让 AI 再次复核。
+                5. 缺失字段不会阻止导出，会保留空列并显示告警。
                 """
             )
     with clear_col:
@@ -270,7 +297,8 @@ def _render_empty_state() -> None:
             <div class="empty-title second">使用说明</div>
             <div class="empty-text">
                 默认混合识别会先检测课程目标结构；没有课程目标结构时，再调用 LLM 识别总分成绩表。
-                解析完成后可以查看字段映射、计算规则、异常字段和人工审核建议，并按文件和字段导出结果。
+                “解析成绩和教学班”会复用成绩结果中的学生姓名与学号，并从文件名、sheet、表头、
+                表尾和关键词邻近单元格提取教学班元数据。
             </div>
         </div>
         """,
@@ -301,14 +329,26 @@ def _parse_uploaded_files(uploaded_files: list[Any], selected_file_ids: set[str]
             "detected_mode": "",
         }
         progress.progress((index - 1) / len(pending_uploads), text=f"正在解析 {uploaded.name}")
-        record = _parse_one_file(uploaded, file_id, settings, st.session_state.score_mode)
+        record = _parse_one_file(
+            uploaded,
+            file_id,
+            settings,
+            st.session_state.score_mode,
+            st.session_state.primary_mode == PRIMARY_SCORE_TEACHING,
+        )
         st.session_state.records[file_id] = record
         if record["status"] == STATUS_DONE and st.session_state.active_record_id is None:
             st.session_state.active_record_id = file_id
     progress.progress(1.0, text="解析完成")
 
 
-def _parse_one_file(uploaded: Any, file_id: str, settings: dict[str, Any], score_mode: str) -> dict[str, Any]:
+def _parse_one_file(
+    uploaded: Any,
+    file_id: str,
+    settings: dict[str, Any],
+    score_mode: str,
+    include_teaching_class: bool = False,
+) -> dict[str, Any]:
     suffix = Path(uploaded.name).suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded.getvalue())
@@ -317,20 +357,23 @@ def _parse_one_file(uploaded: Any, file_id: str, settings: dict[str, Any], score
     try:
         if score_mode == MODE_TARGET:
             result = run_target_workflow(file_path=tmp_path)
-            return _record_from_target_result(file_id, uploaded, result, "手动指定：课程目标成绩")
+            record = _record_from_target_result(file_id, uploaded, result, "手动指定：课程目标成绩")
+            return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         if score_mode == MODE_TOTAL:
             result = _run_total_workflow(tmp_path, settings)
-            return _record_from_total_result(file_id, uploaded, result, "手动指定：课程总分成绩")
+            record = _record_from_total_result(file_id, uploaded, result, "手动指定：课程总分成绩")
+            return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
 
         try:
             result = run_target_workflow(file_path=tmp_path)
-            return _record_from_target_result(file_id, uploaded, result, "混合识别：Python 检测到课程目标结构")
+            record = _record_from_target_result(file_id, uploaded, result, "混合识别：Python 检测到课程目标结构")
+            return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         except Exception as target_error:
             result = _run_total_workflow(tmp_path, settings)
             record = _record_from_total_result(file_id, uploaded, result, "混合识别：未命中课程目标结构，转入 LLM 总分解析")
             record["warnings"].append(f"课程目标结构检测未通过：{target_error}")
             record["audits"] = _build_audit_issues(record["output"], record["warnings"])
-            return record
+            return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
     except Exception as exc:
         return {
             "id": file_id,
@@ -440,6 +483,20 @@ def _record_from_target_result(
     }
 
 
+def _attach_teaching_class(
+    record: dict[str, Any],
+    workbook: Any,
+    original_filename: str,
+) -> dict[str, Any]:
+    workbook.filename = original_filename
+    teaching_result = build_teaching_class_result(workbook, record["output"])
+    record["teaching_workbook"] = workbook
+    record["teaching_result"] = teaching_result
+    record["teaching_output"] = flatten_groups(teaching_result.groups)
+    record["teaching_warnings"] = list(teaching_result.warnings)
+    return record
+
+
 def _render_results() -> None:
     records = st.session_state.records
     ordered_ids = list(records.keys())
@@ -487,10 +544,26 @@ def _render_active_record(record: dict[str, Any]) -> None:
     metric_cols[2].metric("异常字段", _issue_count(record, "异常"))
     metric_cols[3].metric("待人工审核", review_count)
 
-    tab_preview, tab_trace, tab_raw = st.tabs(["数据预览", "字段映射", "原始预览"])
+    tab_names = ["数据预览"]
+    if record.get("teaching_result") is not None:
+        tab_names.append("教学班")
+    tab_names.extend(["字段映射", "原始预览"])
+    tabs = st.tabs(tab_names)
+    tab_index = 0
+    tab_preview = tabs[tab_index]
+    tab_index += 1
+    tab_teaching = None
+    if record.get("teaching_result") is not None:
+        tab_teaching = tabs[tab_index]
+        tab_index += 1
+    tab_trace = tabs[tab_index]
+    tab_raw = tabs[tab_index + 1]
     with tab_preview:
         st.dataframe(output, use_container_width=True, hide_index=True, height=360)
         st.caption(f"显示前 {min(len(output), 500)} 行，共 {len(output)} 行")
+    if tab_teaching is not None:
+        with tab_teaching:
+            _render_teaching_class(record)
     with tab_trace:
         st.dataframe(record["trace"], use_container_width=True, hide_index=True, height=320)
     with tab_raw:
@@ -502,6 +575,123 @@ def _render_side_panel(record: dict[str, Any], done_ids: list[str]) -> None:
     _render_audit_panel(record)
     st.markdown("#### 导出")
     _render_export_panel(record, done_ids)
+
+
+def _render_teaching_class(record: dict[str, Any]) -> None:
+    result: TeachingClassResult = record["teaching_result"]
+    editor_rows = []
+    for group in result.groups:
+        editor_rows.append(
+            {
+                "_group_id": group.group_id,
+                "教学班编号": group.class_code.value,
+                "教学班名称": group.class_name.value,
+                "运行学年": group.school_year.value,
+                "学年内学期": group.term.value,
+                "任课老师名称": group.teacher_name.value,
+                "任课老师工号": group.teacher_id.value,
+                "学生数": len(group.students),
+            }
+        )
+    edited = st.data_editor(
+        pd.DataFrame(editor_rows),
+        column_order=[
+            "教学班编号",
+            "教学班名称",
+            "运行学年",
+            "学年内学期",
+            "任课老师名称",
+            "任课老师工号",
+            "学生数",
+        ],
+        disabled=["学生数"],
+        hide_index=True,
+        use_container_width=True,
+        key=f"teaching_editor_{record['id']}",
+    )
+    if isinstance(edited, pd.DataFrame) and _apply_teaching_group_edits(result, edited):
+        record["teaching_output"] = flatten_groups(result.groups)
+
+    action_col, info_col = st.columns([1.4, 3.6])
+    with action_col:
+        if st.button(
+            "识别不准？AI增加再次解析",
+            key=f"teaching_retry_{record['id']}",
+            use_container_width=True,
+        ):
+            _reanalyze_teaching_class(record)
+            st.rerun()
+    with info_col:
+        st.caption("人工修改会锁定对应分组字段；AI 只更新未锁定且置信度较低的字段。")
+
+    for warning in record.get("teaching_warnings", []):
+        st.warning(warning)
+    st.dataframe(
+        record["teaching_output"],
+        use_container_width=True,
+        hide_index=True,
+        height=300,
+    )
+
+
+def _apply_teaching_group_edits(
+    result: TeachingClassResult,
+    edited: pd.DataFrame,
+) -> bool:
+    field_map = {
+        "教学班编号": "class_code",
+        "教学班名称": "class_name",
+        "运行学年": "school_year",
+        "学年内学期": "term",
+        "任课老师名称": "teacher_name",
+        "任课老师工号": "teacher_id",
+    }
+    group_lookup = {group.group_id: group for group in result.groups}
+    changed = False
+    for _, row in edited.iterrows():
+        group = group_lookup.get(clean_text(row.get("_group_id")))
+        if group is None:
+            continue
+        for column, attribute in field_map.items():
+            if column not in edited.columns:
+                continue
+            new_value = clean_text(row.get(column))
+            field = getattr(group, attribute)
+            if new_value == field.value:
+                continue
+            field.value = new_value
+            field.confidence = 1.0
+            field.source_type = "user_edit"
+            field.locked_by_user = True
+            changed = True
+    if changed:
+        refresh_teaching_warnings(result)
+    return changed
+
+
+def _reanalyze_teaching_class(record: dict[str, Any]) -> None:
+    settings = _runtime_settings()
+    if not settings["api_key"]:
+        st.error("缺少 API Key，请先在右上角设置中填写。")
+        return
+    result: TeachingClassResult = record["teaching_result"]
+    result.evidence = scan_workbook(record["teaching_workbook"], expanded=True, max_items=120)
+
+    def caller(*, system_prompt: str, user_prompt: str) -> str:
+        return call_openai_compatible(
+            base_url=settings["base_url"],
+            api_key=settings["api_key"],
+            model=settings["model"],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+
+    with st.spinner("AI 正在复核不确定字段"):
+        updated = resolve_uncertain_groups(result, caller=caller, enhanced=True)
+    record["teaching_result"] = updated
+    refresh_teaching_warnings(updated)
+    record["teaching_output"] = flatten_groups(updated.groups)
+    record["teaching_warnings"] = list(updated.warnings)
 
 
 def _render_audit_panel(record: dict[str, Any]) -> None:
@@ -532,6 +722,15 @@ def _render_export_panel(record: dict[str, Any], done_ids: list[str]) -> None:
         return
 
     with st.container(border=True):
+        if record.get("teaching_result") is not None:
+            st.download_button(
+                "导出教学班模板",
+                data=teaching_class_to_xlsx(record["teaching_result"].groups),
+                file_name=f"{Path(record['file_name']).stem}_教学班.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True,
+            )
         payload, file_name, mime = _build_export_payload(
             [record["id"]],
             list(record["output"].columns),
@@ -539,11 +738,10 @@ def _render_export_panel(record: dict[str, Any], done_ids: list[str]) -> None:
             f"{Path(record['file_name']).stem}_cleaned.xlsx",
         )
         st.download_button(
-            "直接导出",
+            "导出成绩",
             data=payload,
             file_name=file_name,
             mime=mime,
-            type="primary",
             use_container_width=True,
         )
         if st.button("选择性导出", use_container_width=True):
