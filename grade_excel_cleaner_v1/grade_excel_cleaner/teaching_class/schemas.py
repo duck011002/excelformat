@@ -43,6 +43,8 @@ class ResolvedField:
 class StudentRecord:
     student_id: str = ""
     student_name: str = ""
+    course_name: str = ""
+    class_name: str = ""
 
 
 @dataclass

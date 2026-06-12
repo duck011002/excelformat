@@ -357,7 +357,12 @@ def _parse_one_file(
 
     try:
         if score_mode == MODE_TARGET_ITEMS:
-            result = run_target_item_workflow(file_path=tmp_path)
+            result = run_target_item_workflow(
+                file_path=tmp_path,
+                base_url=settings["base_url"],
+                api_key=settings["api_key"],
+                model=settings["model"],
+            )
             record = _record_from_target_result(
                 file_id,
                 uploaded,
@@ -367,7 +372,12 @@ def _parse_one_file(
             )
             return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         if score_mode == MODE_TARGET:
-            result = run_target_workflow(file_path=tmp_path)
+            result = run_target_workflow(
+                file_path=tmp_path,
+                base_url=settings["base_url"],
+                api_key=settings["api_key"],
+                model=settings["model"],
+            )
             record = _record_from_target_result(file_id, uploaded, result, "手动指定：课程目标成绩")
             return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         if score_mode == MODE_TOTAL:
@@ -376,7 +386,12 @@ def _parse_one_file(
             return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
 
         try:
-            result = run_target_workflow(file_path=tmp_path)
+            result = run_target_workflow(
+                file_path=tmp_path,
+                base_url=settings["base_url"],
+                api_key=settings["api_key"],
+                model=settings["model"],
+            )
             record = _record_from_target_result(file_id, uploaded, result, "混合识别：Python 检测到课程目标结构")
             return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         except Exception as target_error:

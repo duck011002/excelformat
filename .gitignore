@@ -14,6 +14,20 @@ database/
 *.xls
 *.xlsx
 *.xlsb
+grade_excel_cleaner_v1/build/
+grade_excel_cleaner_v1/dist/
+grade_excel_cleaner_v1/build_opt/
+grade_excel_cleaner_v1/dist_opt/
+grade_excel_cleaner_v1/build_verify/
+grade_excel_cleaner_v1/dist_verify/
+grade_excel_cleaner_v1/build_status/
+grade_excel_cleaner_v1/dist_status/
+grade_excel_cleaner_v1/build_final/
+grade_excel_cleaner_v1/dist_final/
+grade_excel_cleaner_v1/build_rootfix/
+grade_excel_cleaner_v1/dist_rootfix/
+grade_excel_cleaner_v1/build_staticfix/
+grade_excel_cleaner_v1/dist_staticfix/
 
 *.dtmp
 .DS_Store

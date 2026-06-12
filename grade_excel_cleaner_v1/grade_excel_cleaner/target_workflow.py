@@ -8,6 +8,8 @@ import pandas as pd
 
 from .excel_reader import WorkbookData, read_workbook
 from .utils import clean_cell
+from .preview_builder import build_workbook_preview
+from .planner import call_llm_for_plan
 
 
 ID_COLUMN = "学号"
@@ -62,17 +64,45 @@ class TargetWorkflowOutput:
     sample_rows: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-def run_target_workflow(*, file_path: str) -> TargetWorkflowOutput:
+def run_target_workflow(
+    *,
+    file_path: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> TargetWorkflowOutput:
     workbook = read_workbook(file_path)
-    return execute_target_workflow(workbook)
+    return execute_target_workflow(
+        workbook,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+    )
 
 
-def run_target_item_workflow(*, file_path: str) -> TargetWorkflowOutput:
+def run_target_item_workflow(
+    *,
+    file_path: str,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> TargetWorkflowOutput:
     workbook = read_workbook(file_path)
-    return execute_target_item_workflow(workbook)
+    return execute_target_item_workflow(
+        workbook,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+    )
 
 
-def execute_target_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
+def execute_target_workflow(
+    workbook: WorkbookData,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> TargetWorkflowOutput:
     plan = _find_best_plan(workbook)
     raw = workbook.sheets[plan.sheet_name].frame
     data = raw.iloc[plan.data_start_row_index :].reset_index(drop=True)
@@ -83,6 +113,28 @@ def execute_target_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
     output = pd.DataFrame()
     output[ID_COLUMN] = data.iloc[:, plan.student_id_column].map(_clean_student_id)
     output[NAME_COLUMN] = data.iloc[:, plan.student_name_column].map(lambda value: clean_cell(value).replace(" ", ""))
+
+    llm_course_name = None
+    llm_class_name = None
+    if api_key:
+        try:
+            preview = build_workbook_preview(workbook, preview_rows=30)
+            plan_llm, _ = call_llm_for_plan(
+                preview=preview,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+            )
+            llm_course_name = plan_llm.metadata_mapping.course_name.value
+            llm_class_name = plan_llm.metadata_mapping.class_name.value
+        except Exception:
+            pass
+
+    course_name_series, class_name_series = _resolve_course_and_class_series(
+        workbook, plan, data, llm_course_name=llm_course_name, llm_class_name=llm_class_name
+    )
+    output["课程名"] = course_name_series
+    output["班级名"] = class_name_series
 
     warnings: list[str] = []
     target_columns: list[str] = []
@@ -103,14 +155,20 @@ def execute_target_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
 
     return TargetWorkflowOutput(
         workbook=workbook,
-        output=output[[ID_COLUMN, NAME_COLUMN, *target_columns, TOTAL_COLUMN]],
+        output=output[[ID_COLUMN, NAME_COLUMN, "课程名", "班级名", *target_columns, TOTAL_COLUMN]],
         plan=plan,
         warnings=warnings,
         sample_rows=data.head(10),
     )
 
 
-def execute_target_item_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
+def execute_target_item_workflow(
+    workbook: WorkbookData,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+) -> TargetWorkflowOutput:
     plan = _find_best_plan(workbook)
     raw = workbook.sheets[plan.sheet_name].frame
     data = raw.iloc[plan.data_start_row_index :].reset_index(drop=True)
@@ -122,8 +180,30 @@ def execute_target_item_workflow(workbook: WorkbookData) -> TargetWorkflowOutput
     output[ID_COLUMN] = data.iloc[:, plan.student_id_column].map(_clean_student_id)
     output[NAME_COLUMN] = data.iloc[:, plan.student_name_column].map(lambda value: clean_cell(value).replace(" ", ""))
 
+    llm_course_name = None
+    llm_class_name = None
+    if api_key:
+        try:
+            preview = build_workbook_preview(workbook, preview_rows=30)
+            plan_llm, _ = call_llm_for_plan(
+                preview=preview,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+            )
+            llm_course_name = plan_llm.metadata_mapping.course_name.value
+            llm_class_name = plan_llm.metadata_mapping.class_name.value
+        except Exception:
+            pass
+
+    course_name_series, class_name_series = _resolve_course_and_class_series(
+        workbook, plan, data, llm_course_name=llm_course_name, llm_class_name=llm_class_name
+    )
+    output["课程名"] = course_name_series
+    output["班级名"] = class_name_series
+
     warnings: list[str] = []
-    output_columns = [ID_COLUMN, NAME_COLUMN]
+    output_columns = [ID_COLUMN, NAME_COLUMN, "课程名", "班级名"]
     target_columns: list[str] = []
     for group in sorted(plan.target_groups, key=lambda item: item.number):
         target_column_name = f"{TARGET_PREFIX}{group.number}"
@@ -142,7 +222,7 @@ def execute_target_item_workflow(workbook: WorkbookData) -> TargetWorkflowOutput
         warnings.append("未识别到总分列，已按课程目标均权计算百分制总分。")
     output_columns.append(TOTAL_COLUMN)
 
-    score_columns = [column for column in output_columns if column not in {ID_COLUMN, NAME_COLUMN}]
+    score_columns = [column for column in output_columns if column not in {ID_COLUMN, NAME_COLUMN, "课程名", "班级名", TOTAL_COLUMN}]
     output = _clean_output(output, score_columns)
     if output.empty:
         raise ValueError("清洗后没有有效成绩数据。")
@@ -559,3 +639,66 @@ def _looks_like_student_id(value: Any) -> bool:
 
 def _normalize(value: Any) -> str:
     return re.sub(r"\s+", "", clean_cell(value))
+
+
+def _resolve_course_and_class_series(
+    workbook: WorkbookData,
+    plan: TargetTablePlan,
+    data: pd.DataFrame,
+    *,
+    llm_course_name: str | None = None,
+    llm_class_name: str | None = None,
+) -> tuple[pd.Series, pd.Series]:
+    raw = workbook.sheets[plan.sheet_name].frame
+    headers = [str(val).strip() for val in raw.iloc[plan.header_row_index].tolist()]
+    header_lookup = {h.lower(): idx for idx, h in enumerate(headers) if h}
+
+    course_col_idx = None
+    for kw in ["课程名", "课程名称", "课程", "科目", "课程号+课程名", "教学班课程"]:
+        for h, idx in header_lookup.items():
+            if kw in h:
+                course_col_idx = idx
+                break
+        if course_col_idx is not None:
+            break
+
+    class_col_idx = None
+    for kw in ["班级名", "班级", "课程班", "课程班别名", "行政班", "行政班级"]:
+        for h, idx in header_lookup.items():
+            if kw in h:
+                class_col_idx = idx
+                break
+        if class_col_idx is not None:
+            break
+
+    metadata = None
+    def get_metadata():
+        nonlocal metadata
+        if metadata is None:
+            from .teaching_class.scanner import scan_workbook
+            from .teaching_class.workflow import _resolve_metadata
+            evidence = scan_workbook(workbook)
+            metadata = _resolve_metadata(evidence)
+        return metadata
+
+    if course_col_idx is not None:
+        course_name_series = data.iloc[:, course_col_idx].map(clean_cell)
+    else:
+        if llm_course_name:
+            course_name = llm_course_name
+        else:
+            meta = get_metadata()
+            course_name = meta.get("course_name", {}).value or "未知课程"
+        course_name_series = pd.Series([course_name] * len(data), index=data.index)
+
+    if class_col_idx is not None:
+        class_name_series = data.iloc[:, class_col_idx].map(clean_cell)
+    else:
+        if llm_class_name is not None:
+            class_name = llm_class_name
+        else:
+            meta = get_metadata()
+            class_name = meta.get("class_name", {}).value or ""
+        class_name_series = pd.Series([class_name] * len(data), index=data.index)
+
+    return course_name_series, class_name_series

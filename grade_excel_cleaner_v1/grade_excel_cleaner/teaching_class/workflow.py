@@ -23,6 +23,8 @@ from .schemas import (
 TEACHING_CLASS_COLUMNS = [
     "教学班编号",
     "教学班名称",
+    "课程名",
+    "班级名",
     "运行学年",
     "学年内学期",
     "任课老师名称",
@@ -57,7 +59,7 @@ def build_teaching_class_result(
     for group_key, group_rows in grouped_rows.items():
         first = group_rows[0] if group_rows else {}
         class_name, grouping_source = _row_group_name(first, metadata["class_name"].value)
-        course_name = clean_cell(first.get("course_name"))
+        course_name = clean_cell(first.get("course_name")) or metadata.get("course_name", ResolvedField()).value or "未知课程"
         group_id = _stable_group_id(group_key, course_name)
         source_code = _first_value(group_rows, "class_code")
         if source_code:
@@ -110,6 +112,8 @@ def build_teaching_class_result(
                     StudentRecord(
                         student_id=clean_cell(row.get("student_id")),
                         student_name=clean_cell(row.get("student_name")),
+                        course_name=clean_cell(row.get("course_name")),
+                        class_name=clean_cell(row.get("course_class_alias")),
                     )
                     for row in group_rows
                 ]
@@ -130,6 +134,8 @@ def flatten_groups(groups: list[TeachingClassGroup]) -> pd.DataFrame:
                 {
                     "教学班编号": group.class_code.value,
                     "教学班名称": group.class_name.value,
+                    "课程名": student.course_name or group.course_name,
+                    "班级名": student.class_name or group.class_name.value,
                     "运行学年": group.school_year.value,
                     "学年内学期": group.term.value,
                     "任课老师名称": group.teacher_name.value,
@@ -211,6 +217,7 @@ def _row_group_name(row: dict[str, str], metadata_class_name: str) -> tuple[str,
 
 def _resolve_metadata(evidence: WorkbookEvidence) -> dict[str, ResolvedField]:
     class_candidates: list[tuple[str, float, str]] = []
+    course_candidates: list[tuple[str, float, str]] = []
     teacher_candidates: list[tuple[str, float, str]] = []
     teacher_id_candidates: list[tuple[str, float, str]] = []
     term_candidates: list[tuple[float, str, str, str]] = []
@@ -220,6 +227,9 @@ def _resolve_metadata(evidence: WorkbookEvidence) -> dict[str, ResolvedField]:
         for value in _extract_labeled_values(item.text, ("教学班名称", "教学班", "课程班别名", "课程班", "班级名称", "班级")):
             if _looks_like_class_candidate(value):
                 class_candidates.append((value, source_confidence, item.text))
+        for value in _extract_labeled_values(item.text, ("课程名称", "课程名", "课程")):
+            if _valid_candidate(value):
+                course_candidates.append((value, source_confidence, item.text))
         for value in _extract_labeled_values(item.text, ("任课老师名称", "任课教师", "教师姓名", "任课老师", "老师")):
             if _valid_candidate(value):
                 teacher_candidates.append((value, source_confidence, item.text))
@@ -246,6 +256,7 @@ def _resolve_metadata(evidence: WorkbookEvidence) -> dict[str, ResolvedField]:
                 teacher_candidates.append((value, 0.68, item.text))
 
     class_name = _field_from_candidates(class_candidates, "metadata")
+    course_name = _field_from_candidates(course_candidates, "metadata")
     teacher_name = _field_from_candidates(teacher_candidates, "metadata")
     teacher_id = _field_from_candidates(teacher_id_candidates, "metadata")
     school_year = ResolvedField()
@@ -268,6 +279,7 @@ def _resolve_metadata(evidence: WorkbookEvidence) -> dict[str, ResolvedField]:
         )
     return {
         "class_name": class_name,
+        "course_name": course_name,
         "school_year": school_year,
         "term": term,
         "teacher_name": teacher_name,

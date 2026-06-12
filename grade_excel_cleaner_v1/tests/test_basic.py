@@ -84,7 +84,7 @@ def test_execute_target_workflow_direct_target_columns():
 
     result = execute_target_workflow(workbook)
 
-    assert list(result.output.columns) == ["学号", "姓名", "课程目标1", "课程目标2", "总分"]
+    assert list(result.output.columns) == ["学号", "姓名", "课程名", "班级名", "课程目标1", "课程目标2", "总分"]
     assert result.output.loc[0, "课程目标1"] == 80
     assert result.output.loc[1, "课程目标2"] == 75
     assert result.output.loc[0, "总分"] == 85
@@ -110,7 +110,7 @@ def test_execute_target_workflow_multirow_grouped_targets():
 
     result = execute_target_workflow(workbook)
 
-    assert list(result.output.columns) == ["学号", "姓名", "课程目标1", "课程目标2", "总分"]
+    assert list(result.output.columns) == ["学号", "姓名", "课程名", "班级名", "课程目标1", "课程目标2", "总分"]
     assert result.output.loc[0, "课程目标1"] == 80
     assert result.output.loc[0, "课程目标2"] == 86.67
     assert result.output.loc[1, "总分"] == 100
@@ -139,6 +139,8 @@ def test_execute_target_item_workflow_keeps_assessment_items():
     assert list(result.output.columns) == [
         "学号",
         "姓名",
+        "课程名",
+        "班级名",
         "课程目标1-学习表现",
         "课程目标1-期末考试",
         "课程目标1",
