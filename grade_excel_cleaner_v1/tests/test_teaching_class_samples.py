@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from grade_excel_cleaner.excel_reader import read_workbook
+from grade_excel_cleaner.target_workflow import execute_target_item_workflow
 from grade_excel_cleaner.teaching_class import (
     TEACHING_CLASS_COLUMNS,
     build_teaching_class_result,
@@ -114,6 +115,22 @@ class RealSampleTests(unittest.TestCase):
                     matched = True
                     break
         self.assertTrue(matched)
+
+    def test_course_target_item_sample_keeps_assessment_item_columns(self) -> None:
+        if self.database is None:
+            self.skipTest("database directory is not available")
+        sample = self.database / "2-课程目标、毕业要求达成度计算表-2024秋.xls"
+        if not sample.exists():
+            self.skipTest("course target item sample is not available")
+
+        result = execute_target_item_workflow(read_workbook(sample))
+
+        self.assertIn("课程目标1-学习表现", result.output.columns)
+        self.assertIn("课程目标1-期末考试", result.output.columns)
+        self.assertIn("课程目标5-实践报告", result.output.columns)
+        self.assertIn("课程目标6-实践报告", result.output.columns)
+        self.assertIn("课程目标6", result.output.columns)
+        self.assertIn("总分", result.output.columns)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 from grade_excel_cleaner.excel_reader import SheetData, WorkbookData
 from grade_excel_cleaner.executor import execute_plan
 from grade_excel_cleaner.schemas import ColumnMapping, ExtractionPlan, MetadataItem, MetadataMapping
-from grade_excel_cleaner.target_workflow import execute_target_workflow
+from grade_excel_cleaner.target_workflow import execute_target_item_workflow, execute_target_workflow
 from grade_excel_cleaner.utils import extract_json_object
 from grade_excel_cleaner.validator import validate_output
 from app import _build_audit_issues
@@ -116,6 +116,45 @@ def test_execute_target_workflow_multirow_grouped_targets():
     assert result.output.loc[1, "总分"] == 100
 
 
+def test_execute_target_item_workflow_keeps_assessment_items():
+    raw = pd.DataFrame(
+        [
+            ["序号", "学号", "学生姓名", "毕业要求1", None, "毕业要求2", None, "总评成绩"],
+            [None, None, None, "课程目标1", None, "课程目标2", None, None],
+            [None, None, None, "学习表现", "期末考试", "作业", "期末考试", None],
+            [None, None, None, 5, 15, 10, 20, 100],
+            [1, "20230001", "张三", 4, 12, 8, 18, 84],
+            [2, "20230002", "李四", 5, 15, 10, 20, 100],
+        ]
+    )
+    workbook = WorkbookData(
+        filename="多行目标含考核项.xlsx",
+        sheets={"Sheet1": SheetData(name="Sheet1", frame=raw)},
+        engine_used="mock",
+        read_warnings=[],
+    )
+
+    result = execute_target_item_workflow(workbook)
+
+    assert list(result.output.columns) == [
+        "学号",
+        "姓名",
+        "课程目标1-学习表现",
+        "课程目标1-期末考试",
+        "课程目标1",
+        "课程目标2-作业",
+        "课程目标2-期末考试",
+        "课程目标2",
+        "总分",
+    ]
+    assert result.output.loc[0, "课程目标1-学习表现"] == 4
+    assert result.output.loc[0, "课程目标1-期末考试"] == 12
+    assert result.output.loc[0, "课程目标1"] == 80
+    assert result.output.loc[0, "课程目标2-作业"] == 8
+    assert result.output.loc[0, "课程目标2-期末考试"] == 18
+    assert result.output.loc[0, "课程目标2"] == 86.67
+
+
 def test_audit_does_not_count_blank_student_ids_as_duplicates():
     output = pd.DataFrame(
         {
@@ -137,5 +176,6 @@ if __name__ == "__main__":
     test_execute_plan_with_metadata_course_name()
     test_execute_target_workflow_direct_target_columns()
     test_execute_target_workflow_multirow_grouped_targets()
+    test_execute_target_item_workflow_keeps_assessment_items()
     test_audit_does_not_count_blank_student_ids_as_duplicates()
     print("basic tests passed")

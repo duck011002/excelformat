@@ -16,7 +16,7 @@ import streamlit.components.v1 as components
 from grade_excel_cleaner.planner import WorkflowOutput, run_workflow
 from grade_excel_cleaner.preview_builder import preview_to_json
 from grade_excel_cleaner.settings import load_app_settings, normalize_base_url
-from grade_excel_cleaner.target_workflow import TargetWorkflowOutput, run_target_workflow
+from grade_excel_cleaner.target_workflow import TargetWorkflowOutput, run_target_item_workflow, run_target_workflow
 from grade_excel_cleaner.llm_client import call_openai_compatible
 from grade_excel_cleaner.teaching_class import (
     build_teaching_class_result,
@@ -32,6 +32,7 @@ from grade_excel_cleaner.teaching_class.schemas import TeachingClassResult
 MODE_AUTO = "混合类型识别"
 MODE_TOTAL = "含课程总分成绩"
 MODE_TARGET = "含课程目标成绩"
+MODE_TARGET_ITEMS = "含课程目标成绩（含考核项）"
 PRIMARY_SCORE_ONLY = "仅解析成绩"
 PRIMARY_SCORE_TEACHING = "解析成绩和教学班"
 STATUS_PENDING = "待解析"
@@ -60,7 +61,7 @@ def main() -> None:
     with subtype_col:
         st.selectbox(
             "成绩解析类型",
-            [MODE_AUTO, MODE_TOTAL, MODE_TARGET],
+            [MODE_AUTO, MODE_TOTAL, MODE_TARGET, MODE_TARGET_ITEMS],
             key="score_mode",
             help="混合识别会先检测课程目标结构；未命中时再调用 LLM 识别总分成绩表。",
         )
@@ -355,6 +356,16 @@ def _parse_one_file(
         tmp_path = tmp.name
 
     try:
+        if score_mode == MODE_TARGET_ITEMS:
+            result = run_target_item_workflow(file_path=tmp_path)
+            record = _record_from_target_result(
+                file_id,
+                uploaded,
+                result,
+                "手动指定：课程目标成绩（含考核项）",
+                MODE_TARGET_ITEMS,
+            )
+            return _attach_teaching_class(record, result.workbook, uploaded.name) if include_teaching_class else record
         if score_mode == MODE_TARGET:
             result = run_target_workflow(file_path=tmp_path)
             record = _record_from_target_result(file_id, uploaded, result, "手动指定：课程目标成绩")
@@ -447,16 +458,17 @@ def _record_from_target_result(
     uploaded: Any,
     result: TargetWorkflowOutput,
     detection_reason: str,
+    detected_mode: str = MODE_TARGET,
 ) -> dict[str, Any]:
     warnings = list(dict.fromkeys(result.warnings + result.workbook.read_warnings))
     output = result.output
-    trace = _prepend_detection_trace(_trace_target_result(result), MODE_TARGET, detection_reason)
+    trace = _prepend_detection_trace(_trace_target_result(result), detected_mode, detection_reason)
     return {
         "id": file_id,
         "file_name": uploaded.name,
         "size": uploaded.size,
         "status": STATUS_DONE,
-        "detected_mode": MODE_TARGET,
+        "detected_mode": detected_mode,
         "detection_reason": detection_reason,
         "output": output,
         "trace": trace,

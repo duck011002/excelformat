@@ -67,6 +67,11 @@ def run_target_workflow(*, file_path: str) -> TargetWorkflowOutput:
     return execute_target_workflow(workbook)
 
 
+def run_target_item_workflow(*, file_path: str) -> TargetWorkflowOutput:
+    workbook = read_workbook(file_path)
+    return execute_target_item_workflow(workbook)
+
+
 def execute_target_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
     plan = _find_best_plan(workbook)
     raw = workbook.sheets[plan.sheet_name].frame
@@ -99,6 +104,52 @@ def execute_target_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
     return TargetWorkflowOutput(
         workbook=workbook,
         output=output[[ID_COLUMN, NAME_COLUMN, *target_columns, TOTAL_COLUMN]],
+        plan=plan,
+        warnings=warnings,
+        sample_rows=data.head(10),
+    )
+
+
+def execute_target_item_workflow(workbook: WorkbookData) -> TargetWorkflowOutput:
+    plan = _find_best_plan(workbook)
+    raw = workbook.sheets[plan.sheet_name].frame
+    data = raw.iloc[plan.data_start_row_index :].reset_index(drop=True)
+    data = _trim_student_rows(data, plan.student_id_column, plan.student_name_column)
+    if data.empty:
+        raise ValueError("识别到表头后没有找到有效学生数据。")
+
+    output = pd.DataFrame()
+    output[ID_COLUMN] = data.iloc[:, plan.student_id_column].map(_clean_student_id)
+    output[NAME_COLUMN] = data.iloc[:, plan.student_name_column].map(lambda value: clean_cell(value).replace(" ", ""))
+
+    warnings: list[str] = []
+    output_columns = [ID_COLUMN, NAME_COLUMN]
+    target_columns: list[str] = []
+    for group in sorted(plan.target_groups, key=lambda item: item.number):
+        target_column_name = f"{TARGET_PREFIX}{group.number}"
+        item_columns = _build_assessment_item_columns(data, group)
+        for item_column_name, item_values in item_columns:
+            output[item_column_name] = item_values
+            output_columns.append(item_column_name)
+        target_columns.append(target_column_name)
+        output[target_column_name] = _build_target_score(data, group)
+        output_columns.append(target_column_name)
+
+    if plan.total_column is not None:
+        output[TOTAL_COLUMN] = data.iloc[:, plan.total_column].map(_score_to_number)
+    else:
+        output[TOTAL_COLUMN] = _fallback_total(output[target_columns])
+        warnings.append("未识别到总分列，已按课程目标均权计算百分制总分。")
+    output_columns.append(TOTAL_COLUMN)
+
+    score_columns = [column for column in output_columns if column not in {ID_COLUMN, NAME_COLUMN}]
+    output = _clean_output(output, score_columns)
+    if output.empty:
+        raise ValueError("清洗后没有有效成绩数据。")
+
+    return TargetWorkflowOutput(
+        workbook=workbook,
+        output=output[output_columns],
         plan=plan,
         warnings=warnings,
         sample_rows=data.head(10),
@@ -321,6 +372,36 @@ def _build_target_score(data: pd.DataFrame, group: TargetGroup) -> pd.Series:
         return data.iloc[:, column].map(_score_to_percent_if_ratio)
 
     return data.apply(lambda row: _round_or_none(_row_sum(row, group.source_columns)), axis=1)
+
+
+def _build_assessment_item_columns(data: pd.DataFrame, group: TargetGroup) -> list[tuple[str, pd.Series]]:
+    columns: list[tuple[str, pd.Series]] = []
+    used_names: set[str] = set()
+    for index, source_column in enumerate(group.source_columns, start=1):
+        raw_header = group.source_headers[index - 1] if index <= len(group.source_headers) else ""
+        item_name = _assessment_item_name(raw_header, group.number, index)
+        column_name = _unique_column_name(f"{TARGET_PREFIX}{group.number}-{item_name}", used_names)
+        columns.append((column_name, data.iloc[:, source_column].map(_score_to_number)))
+    return columns
+
+
+def _assessment_item_name(raw_header: str, target_number: int, fallback_index: int) -> str:
+    text = clean_cell(raw_header).replace("\n", "")
+    text = re.sub(rf"{TARGET_PREFIX}\s*{target_number}", "", text)
+    text = re.sub(r"\s+", "", text)
+    return text or f"考核项{fallback_index}"
+
+
+def _unique_column_name(base_name: str, used_names: set[str]) -> str:
+    if base_name not in used_names:
+        used_names.add(base_name)
+        return base_name
+    index = 2
+    while f"{base_name}.{index}" in used_names:
+        index += 1
+    name = f"{base_name}.{index}"
+    used_names.add(name)
+    return name
 
 
 def _fallback_total(target_scores: pd.DataFrame) -> pd.Series:
